@@ -1,8 +1,12 @@
 
+# LCD I2C Driver
 
+Trình điều khiển màn hình LCD 16x2 thông qua Module I2C chuyển đổi (Địa chỉ mặc định 0x27 trên Bus I2C-2).
 
+---
 
 ### 1. Tệp cấu hình: `Config.in`
+> **Mô tả chức năng:** Khai báo gói phần mềm `lcd_driver` vào menu cấu hình của Buildroot, cho phép chọn biên dịch Driver này cùng với Linux Kernel.
 
 ```kconfig
 config BR2_PACKAGE_LCD_DRIVER
@@ -13,7 +17,11 @@ config BR2_PACKAGE_LCD_DRIVER
 
 ```
 
+---
+
 ### 2. Tệp cấu hình: `lcd_driver.mk`
+
+> **Mô tả chức năng:** Makefile của Buildroot dùng để chỉ đạo quá trình biên dịch chéo (Cross-compile). Nó truyền các biến như môi trường kiến trúc (`ARCH`) và trình biên dịch chéo (`CROSS_COMPILE`) vào Makefile của Kernel, sau đó copy file `.ko` vào thư mục `/lib/modules/` của bo mạch.
 
 ```make
 LCD_DRIVER_VERSION = 1.0
@@ -36,7 +44,11 @@ $(eval $(generic-package))
 
 ```
 
+---
+
 ### 3. Mã nguồn Driver: `src/lcd_driver.c`
+
+> **Mô tả chức năng tổng quan:** Trình điều khiển I2C Client kết hợp Character Device. Nó tự động dò tìm địa chỉ 0x27 trên I2C bus 2, sau đó tạo file `/dev/lcd_dev`. Khi User Space ghi chuỗi vào file này, Driver sẽ chuyển đổi chuỗi thành các tín hiệu I2C điều khiển module mở rộng PCF8574.
 
 ```c
 #include <linux/module.h>
@@ -60,6 +72,11 @@ static struct class *lcd_class;
 static struct device *lcd_device;
 static struct i2c_client *auto_client;
 
+/* * KHỐI 1: GIAO TIẾP I2C (MỨC THẤP)
+ * Module I2C PCF8574 giao tiếp với LCD theo chế độ 4-bit.
+ * Hàm này tách 1 byte dữ liệu thành 2 nửa (nibble cao và thấp),
+ * kết hợp với các bit điều khiển (Đèn nền, Enable) rồi gửi qua I2C.
+ */
 static void lcd_send_byte(uint8_t val, uint8_t mode) {
     uint8_t buf[4];
     uint8_t hi = (val & 0xf0) | mode | LCD_BACKLIGHT;
@@ -72,6 +89,10 @@ static void lcd_send_byte(uint8_t val, uint8_t mode) {
     i2c_master_send(lcd_client, buf, 4);
 }
 
+/* * KHỐI 2: KHỞI TẠO MÀN HÌNH LCD
+ * Gửi chuỗi lệnh khởi tạo chuẩn của HD44780 để cấu hình LCD 
+ * hoạt động ở chế độ 4-bit, 2 dòng, bật hiển thị và xóa màn hình.
+ */
 static void lcd_init(void) {
     mdelay(50);
     lcd_send_byte(0x33, 0);
@@ -85,6 +106,13 @@ static void lcd_init(void) {
     mdelay(5);
 }
 
+/* * KHỐI 3: HÀM GHI DỮ LIỆU (WRITE) TỪ USER SPACE
+ * Nhận chuỗi ký tự từ hàm write() của ứng dụng User.
+ * Xử lý đặc biệt các ký tự điều khiển:
+ * - '\n': Chuyển con trỏ xuống dòng thứ 2 (Lệnh 0xC0).
+ * - '\f' hoặc '\r': Xóa toàn bộ màn hình (Lệnh 0x01).
+ * Các ký tự khác được in ra bình thường.
+ */
 static ssize_t lcd_write(struct file *f, const char __user *buf, size_t len, loff_t *off) {
     char kbuf[64];
     int i;
@@ -111,6 +139,11 @@ static struct file_operations fops = {
     .write = lcd_write,
 };
 
+/* * KHỐI 4: PROBE & INIT (CẤU HÌNH THIẾT BỊ)
+ * Hàm probe được Kernel gọi khi phát hiện thiết bị I2C khớp địa chỉ.
+ * Nó đăng ký Character Device, khởi tạo class sysfs và chạy lệnh lcd_init().
+ * Hàm my_lcd_init ép Kernel tìm kiếm thiết bị ở bus i2c-2 với địa chỉ 0x27.
+ */
 static int lcd_probe(struct i2c_client *client) {
     int ret;
     lcd_client = client;
@@ -197,7 +230,11 @@ MODULE_LICENSE("GPL");
 
 ```
 
+---
+
 ### 4. Tệp: `src/Makefile`
+
+> **Mô tả chức năng:** Kbuild Makefile biên dịch file `lcd_driver.c` thành module `lcd_driver.ko`.
 
 ```make
 obj-m += lcd_driver.o
@@ -211,5 +248,7 @@ clean:
 ```
 
 ```
+
+
 
 ```
