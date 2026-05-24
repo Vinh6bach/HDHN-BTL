@@ -1,12 +1,12 @@
 
-
-
 # Keypad 1x4 Platform Driver
 
 Trình điều khiển bàn phím Ma trận nút nhấn (1x4) sử dụng cấu trúc `platform_driver` và nạp thuộc tính phần cứng thông qua Device Tree (`of_match_table`).
 
+---
 
 ### 1. Tệp cấu hình: `Config.in`
+> **Mô tả chức năng:** Khai báo module Keypad vào danh sách các gói phần mềm của Buildroot, cho phép chọn biên dịch cùng Kernel.
 
 ```kconfig
 config BR2_PACKAGE_KEYPAD2
@@ -17,7 +17,11 @@ config BR2_PACKAGE_KEYPAD2
 
 ```
 
+---
+
 ### 2. Tệp cấu hình: `keypad2.mk`
+
+> **Mô tả chức năng:** Kịch bản Buildroot biên dịch module bàn phím. Sử dụng biến `$(LINUX_VERSION_PROMOTED)/extra/` để sắp xếp module sau khi cài đặt vào đúng thư mục của hệ thống nhúng.
 
 ```make
 KEYPAD2_VERSION = 1.0
@@ -38,7 +42,11 @@ $(eval $(generic-package))
 
 ```
 
+---
+
 ### 3. Mã nguồn Driver: `src/keypad2.c`
+
+> **Mô tả chức năng tổng quan:** Trình điều khiển thiết bị nền tảng (Platform Driver). Nó tự động đọc các chân GPIO được định nghĩa trong Device Tree (DTS), cấu hình cả 4 chân này thành Input Interrupt. Sử dụng cơ chế khóa `mutex` và `wait_queue` để xử lý đồng bộ dữ liệu một cách an toàn khi có người dùng bấm phím.
 
 ```c
 #include <linux/module.h>
@@ -64,6 +72,7 @@ struct keypad_btn {
     char val;
 };
 
+// Cấu trúc quản lý trạng thái của toàn bộ Keypad
 struct keypad_dev {
     struct keypad_btn btns[BTN_COUNT];
     dev_t dev_num;
@@ -73,12 +82,17 @@ struct keypad_dev {
     unsigned long last_jiffies;
     char key_pressed;
     bool has_data;
-    wait_queue_head_t wq;
-    struct mutex lock;
+    wait_queue_head_t wq; // Hàng đợi chờ phím
+    struct mutex lock;    // Khóa Mutex chống xung đột luồng
 };
 
 static struct keypad_dev *kdev;
 
+/* * KHỐI 1: XỬ LÝ NGẮT TỪ 4 NÚT NHẤN (ISR)
+ * Hàm này dùng chung cho cả 4 nút. Tham số dev_id mang theo thông tin nút nào bị nhấn.
+ * Lọc nhiễu (Debounce) 200ms, ghi nhận giá trị phím (1, 2, 3, hoặc 4) 
+ * và đánh thức tiến trình đang ngủ chờ trong hàng đợi.
+ */
 static irqreturn_t keypad_handler(int irq, void *dev_id) {
     struct keypad_btn *b = (struct keypad_btn *)dev_id;
     if (time_after(jiffies, kdev->last_jiffies + msecs_to_jiffies(200))) {
@@ -90,6 +104,11 @@ static irqreturn_t keypad_handler(int irq, void *dev_id) {
     return IRQ_HANDLED;
 }
 
+/* * KHỐI 2: ĐỌC GIÁ TRỊ PHÍM TỪ USER SPACE
+ * Khi ứng dụng gọi read(), nó sẽ bị ép ngủ nếu chưa có nút nào được nhấn.
+ * Sử dụng mutex_lock để đảm bảo biến kdev->key_pressed không bị thay đổi bởi ngắt 
+ * trong lúc Kernel đang copy dữ liệu lên User Space.
+ */
 static ssize_t keypad_read(struct file *f, char __user *buf, size_t len, loff_t *off) {
     char out[2];
     if (wait_event_interruptible(kdev->wq, kdev->has_data)) return -ERESTARTSYS;
@@ -109,6 +128,11 @@ static struct file_operations fops = {
     .read = keypad_read,
 };
 
+/* * KHỐI 3: PLATFORM PROBE (LIÊN KẾT DEVICE TREE)
+ * Khi Kernel phân tích file DTS và thấy nhãn "my,keypad-1x4", nó sẽ tự động gọi hàm probe.
+ * Hàm này trích xuất cấu hình GPIO từ thuộc tính "keypad-gpios" trong Device Tree.
+ * Vòng lặp duyệt qua 4 GPIO, đăng ký cấp phát ngắt tương ứng cho từng chân (Sườn xuống).
+ */
 static int keypad_probe(struct platform_device *pdev) {
     struct device_node *np = pdev->dev.of_node;
     int i, ret;
@@ -149,6 +173,9 @@ err_class:
     return ret;
 }
 
+/* * KHỐI 4: HÀM HỦY THIẾT BỊ (REMOVE)
+ * Thu hồi ngắt, giải phóng GPIO và xóa các Device Node khi gỡ module.
+ */
 static void keypad_remove(struct platform_device *pdev) {
     int i;
     for (i = 0; i < BTN_COUNT; i++) {
@@ -162,6 +189,7 @@ static void keypad_remove(struct platform_device *pdev) {
     kfree(kdev);
 }
 
+// Bảng Match Table: Định danh phần cứng tương ứng trong Device Tree
 static const struct of_device_id kp_match[] = {
     { .compatible = "my,keypad-1x4", },
     { }
@@ -179,7 +207,11 @@ MODULE_LICENSE("GPL");
 
 ```
 
+---
+
 ### 4. Tệp: `src/Makefile`
+
+> **Mô tả chức năng:** Kbuild Makefile sử dụng biến `obj-m` để báo cho trình biên dịch biết mã nguồn C nào sẽ được build thành Kernel Module.
 
 ```make
 obj-m += keypad2.o
@@ -192,3 +224,7 @@ clean:
 
 ```
 
+```
+
+
+```
