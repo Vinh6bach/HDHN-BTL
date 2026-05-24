@@ -192,8 +192,3 @@ clean:
 
 ```
 
-```
-
-Sau khi paste xong, bạn sang tab `Preview` ngó xem nó đã chia thành 4 ô vuông vức chưa nhé! Nhắn "xong" để lấy file App Test cuối cùng nha.
-
-```
