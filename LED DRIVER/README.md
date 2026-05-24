@@ -1,4 +1,4 @@
-
+Trình điều khiển LED (GPIO 60) sử dụng kỹ thuật ánh xạ bộ nhớ vật lý `ioremap` trên AM335x.
 ### 1. Tệp cấu hình: `Config.in`
 
 ```kconfig
